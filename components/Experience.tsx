@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CHAPTERS,
   SITES,
@@ -44,10 +44,8 @@ function allOn(): Record<SpeciesId, boolean> {
 }
 
 function yearToSlider(year: number) {
-  const min = 0;
   const max = 1_800_000;
-  const y = Math.min(max, Math.max(min, year));
-  // more resolution in the last 100 ka
+  const y = Math.min(max, Math.max(0, year));
   const logMax = Math.log10(max + 1000);
   const logY = Math.log10(y + 1000);
   return 1 - (logY - Math.log10(1000)) / (logMax - Math.log10(1000));
@@ -60,6 +58,25 @@ function sliderToYear(t: number) {
   return Math.max(0, Math.pow(10, logY) - 1000);
 }
 
+function lerpYear(a: number, b: number, t: number) {
+  const la = Math.log10(a + 1);
+  const lb = Math.log10(b + 1);
+  return Math.pow(10, la + (lb - la) * t) - 1;
+}
+
+function chapterFromYear(year: number) {
+  let best = 0;
+  let d = Infinity;
+  CHAPTERS.forEach((c, i) => {
+    const dd = Math.abs(Math.log10(c.year + 1) - Math.log10(year + 1));
+    if (dd < d) {
+      d = dd;
+      best = i;
+    }
+  });
+  return best;
+}
+
 export function Experience() {
   const [chapter, setChapter] = useState(2);
   const [year, setYear] = useState(CHAPTERS[2].year);
@@ -70,15 +87,54 @@ export function Experience() {
   const [siteId, setSiteId] = useState<string | null>(null);
   const [legend, setLegend] = useState(false);
 
+  const appRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const ignoreScroll = useRef(false);
+  const playTimer = useRef<number | null>(null);
+
   const ch = CHAPTERS[chapter];
   const climate = sampleClimate(year);
   const site = SITES.find((s) => s.id === siteId) ?? null;
 
-  const goChapter = useCallback((i: number) => {
-    const next = (i + CHAPTERS.length) % CHAPTERS.length;
-    setChapter(next);
-    setYear(CHAPTERS[next].year);
-    setSiteId(null);
+  const scrollToChapter = useCallback((i: number, smooth = true) => {
+    const rail = railRef.current;
+    if (!rail) return;
+    const card = rail.querySelector<HTMLElement>(`[data-chapter="${i}"]`);
+    if (!card) return;
+    ignoreScroll.current = true;
+    card.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+    window.setTimeout(() => {
+      ignoreScroll.current = false;
+    }, smooth ? 420 : 50);
+  }, []);
+
+  const goChapter = useCallback(
+    (i: number, smooth = true) => {
+      const next = (i + CHAPTERS.length) % CHAPTERS.length;
+      setChapter(next);
+      setYear(CHAPTERS[next].year);
+      setSiteId(null);
+      scrollToChapter(next, smooth);
+    },
+    [scrollToChapter],
+  );
+
+  const applyRailScroll = useCallback(() => {
+    const rail = railRef.current;
+    if (!rail || ignoreScroll.current) return;
+    const h = rail.clientHeight || 1;
+    const p = rail.scrollTop / h;
+    const maxI = CHAPTERS.length - 1;
+    const clamped = Math.min(maxI, Math.max(0, p));
+    const i = Math.min(maxI - 1, Math.floor(clamped));
+    const t = clamped - i;
+    const y =
+      i >= maxI
+        ? CHAPTERS[maxI].year
+        : lerpYear(CHAPTERS[i].year, CHAPTERS[i + 1].year, Math.min(1, Math.max(0, t)));
+    const active = Math.min(maxI, Math.max(0, Math.round(clamped)));
+    setYear(y);
+    setChapter(active);
   }, []);
 
   useEffect(() => {
@@ -86,30 +142,44 @@ export function Experience() {
     if (q.get("start") === "1") setIntro(false);
     const raw = q.get("chapter");
     if (raw !== null) {
-      const ch = Number(raw);
-      if (!Number.isNaN(ch) && CHAPTERS[ch]) {
-        setChapter(ch);
-        setYear(CHAPTERS[ch].year);
+      const i = Number(raw);
+      if (!Number.isNaN(i) && CHAPTERS[i]) {
+        setChapter(i);
+        setYear(CHAPTERS[i].year);
+        requestAnimationFrame(() => scrollToChapter(i, false));
       }
+    } else {
+      requestAnimationFrame(() => scrollToChapter(2, false));
     }
-  }, []);
+  }, [scrollToChapter]);
 
   useEffect(() => {
     if (!playing || intro) return;
-    const id = window.setInterval(() => {
+    playTimer.current = window.setInterval(() => {
       setChapter((c) => {
         const n = (c + 1) % CHAPTERS.length;
         setYear(CHAPTERS[n].year);
+        scrollToChapter(n, true);
         return n;
       });
-    }, 9000);
-    return () => window.clearInterval(id);
-  }, [playing, intro]);
+    }, 8000);
+    return () => {
+      if (playTimer.current) window.clearInterval(playTimer.current);
+    };
+  }, [playing, intro, scrollToChapter]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight") goChapter(chapter + 1);
-      if (e.key === "ArrowLeft") goChapter(chapter - 1);
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        setPlaying(false);
+        goChapter(chapter + 1);
+      }
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setPlaying(false);
+        goChapter(chapter - 1);
+      }
       if (e.key === " ") {
         e.preventDefault();
         setPlaying((p) => !p);
@@ -117,14 +187,33 @@ export function Experience() {
       if (e.key === "Escape") {
         setSources(false);
         setIntro(false);
+        setLegend(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [chapter, goChapter]);
 
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app) return;
+    const onWheel = (e: WheelEvent) => {
+      if (intro || sources) return;
+      const rail = railRef.current;
+      if (!rail) return;
+      const target = e.target as Node | null;
+      if (target && rail.contains(target)) return;
+      if (target && (target as HTMLElement).closest?.(".legend, .modal, .timeline")) return;
+      e.preventDefault();
+      setPlaying(false);
+      rail.scrollTop += e.deltaY;
+    };
+    app.addEventListener("wheel", onWheel, { passive: false });
+    return () => app.removeEventListener("wheel", onWheel);
+  }, [intro, sources]);
+
   return (
-    <div className="app">
+    <div className="app" ref={appRef}>
       <div className="globe-wrap">
         <GlobeCanvas
           chapter={chapter}
@@ -140,7 +229,7 @@ export function Experience() {
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark">MANKIND</span>
-          <span className="brand-sub">a deep-time atlas</span>
+          <span className="brand-sub">scroll to travel time</span>
         </div>
         <div className="year-block">
           <div className="year">{prettyYear(year)}</div>
@@ -177,7 +266,9 @@ export function Experience() {
                 <b>{s.name}</b>
                 <em>{s.latin}</em>
               </span>
-              <small>{prettyYear(s.from)} – {s.to === 0 ? "now" : prettyYear(s.to)}</small>
+              <small>
+                {prettyYear(s.from)} – {s.to === 0 ? "now" : prettyYear(s.to)}
+              </small>
             </button>
           );
         })}
@@ -185,32 +276,53 @@ export function Experience() {
       </aside>
 
       <section className="panel">
-        <div className="kicker">
-          <span>{String(chapter + 1).padStart(2, "0")} / {String(CHAPTERS.length).padStart(2, "0")}</span>
-          <span>{ch.kicker}</span>
+        <div
+          className="story-rail"
+          ref={railRef}
+          onScroll={applyRailScroll}
+          aria-label="Deep-time stories"
+        >
+          {CHAPTERS.map((card, i) => (
+            <article
+              key={card.id}
+              className={`digest ${i === chapter ? "on" : ""}`}
+              data-chapter={i}
+            >
+              <div className="kicker">
+                <span>
+                  {String(i + 1).padStart(2, "0")} / {String(CHAPTERS.length).padStart(2, "0")}
+                </span>
+                <span>{card.kicker}</span>
+              </div>
+              <p className="digest-year">{card.yearLabel}</p>
+              <h1>{card.title}</h1>
+              <p className="lede">{card.digest}</p>
+              {card.facts && (
+                <ul className="facts">
+                  {card.facts.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+              )}
+              {card.note && <p className="caveat">{card.note}</p>}
+              {i === chapter && site && (
+                <div className="site-card">
+                  <b>{site.name}</b>
+                  <span>{prettyYear(site.year)}</span>
+                  <p>{site.text}</p>
+                </div>
+              )}
+            </article>
+          ))}
         </div>
-        <h1>{ch.title}</h1>
-        <p className="lede">{ch.body}</p>
-        {ch.note && <p className="caveat">{ch.note}</p>}
-        {site && (
-          <div className="site-card">
-            <b>{site.name}</b>
-            <span>{prettyYear(site.year)}</span>
-            <p>{site.text}</p>
-          </div>
-        )}
-        <figure className="chapter-art">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={ch.image} alt="" />
-        </figure>
         <div className="panel-nav">
-          <button className="ghost" onClick={() => goChapter(chapter - 1)}>
+          <button className="ghost" onClick={() => { setPlaying(false); goChapter(chapter - 1); }}>
             ← Prev
           </button>
           <button className="play" onClick={() => setPlaying((p) => !p)}>
-            {playing ? "Pause" : "Play chapters"}
+            {playing ? "Pause" : "Play"}
           </button>
-          <button className="ghost" onClick={() => goChapter(chapter + 1)}>
+          <button className="ghost" onClick={() => { setPlaying(false); goChapter(chapter + 1); }}>
             Next →
           </button>
         </div>
@@ -221,6 +333,8 @@ export function Experience() {
         <span>ice {Math.round(climate.ice * 100)}%</span>
         <span>sea {Math.round(-120 * climate.shelf)} m</span>
       </div>
+
+      <p className="scroll-hint">Scroll or swipe the stories · drag the globe</p>
 
       <footer className="timeline">
         <input
@@ -233,17 +347,10 @@ export function Experience() {
           onChange={(e) => {
             const y = sliderToYear(Number(e.target.value));
             setYear(y);
-            let best = 0;
-            let d = Infinity;
-            CHAPTERS.forEach((c, i) => {
-              const dd = Math.abs(Math.log10(c.year + 1) - Math.log10(y + 1));
-              if (dd < d) {
-                d = dd;
-                best = i;
-              }
-            });
-            setChapter(best);
+            const i = chapterFromYear(y);
+            setChapter(i);
             setPlaying(false);
+            scrollToChapter(i, false);
           }}
         />
         <div className="ticks">
@@ -252,7 +359,10 @@ export function Experience() {
               key={c.id}
               className={i === chapter ? "tick on" : "tick"}
               style={{ left: `${yearToSlider(c.year) * 100}%` }}
-              onClick={() => goChapter(i)}
+              onClick={() => {
+                setPlaying(false);
+                goChapter(i);
+              }}
               title={c.title}
             >
               <span>{prettyYear(c.year)}</span>
@@ -267,20 +377,21 @@ export function Experience() {
             <p className="eyebrow">From Africa, into ice, across water</p>
             <h2>MANKIND</h2>
             <p>
-              A globe of the last two million years: how Homo sapiens spread, how Neanderthals,
-              Denisovans, hobbits and others lived beside us, and how ice and drowned land rewrote
-              the map. Built from research through 2026.
+              Scroll the last two million years. Short stories on a spinning Earth: how sapiens
+              spread, how Neanderthals and Denisovans lived beside us, how ice redrew the map —
+              and why “Adam and Eve” in genetics were never a couple.
             </p>
             <ul>
-              <li>Drag the world. Scrub time. Open a chapter.</li>
+              <li>Scroll or swipe to move time. Drag the globe to look around.</li>
               <li>Gold is us. Ember is Neanderthal. Violet is Denisovan. Teal is Flores.</li>
-              <li>Ice and shelves are schematic, not a GIS reconstruction.</li>
+              <li>Y-Adam ~270 ka. Mitochondrial Eve ~155 ka. Different centuries. Same continent.</li>
             </ul>
             <button
               className="play big"
               onClick={() => {
                 setIntro(false);
-                setPlaying(true);
+                setPlaying(false);
+                scrollToChapter(chapter, false);
               }}
             >
               Begin

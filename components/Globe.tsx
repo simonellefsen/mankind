@@ -455,10 +455,10 @@ function Scene({
         enablePan={false}
         enableDamping
         dampingFactor={0.08}
+        enableZoom={false}
         minDistance={1.55}
         maxDistance={4.8}
         rotateSpeed={0.7}
-        zoomSpeed={0.7}
         onStart={() => {
           dragging.current = true;
         }}
