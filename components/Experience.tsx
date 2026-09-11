@@ -354,20 +354,27 @@ export function Experience() {
           }}
         />
         <div className="ticks">
-          {CHAPTERS.map((c, i) => (
-            <button
-              key={c.id}
-              className={i === chapter ? "tick on" : "tick"}
-              style={{ left: `${yearToSlider(c.year) * 100}%` }}
-              onClick={() => {
-                setPlaying(false);
-                goChapter(i);
-              }}
-              title={c.title}
-            >
-              <span>{prettyYear(c.year)}</span>
-            </button>
-          ))}
+          {CHAPTERS.map((c, i) => {
+            const t = yearToSlider(c.year);
+            const overlap = CHAPTERS.some(
+              (other, j) =>
+                j < i && Math.abs(yearToSlider(other.year) - t) < 0.028,
+            );
+            return (
+              <button
+                key={c.id}
+                className={`tick ${i === chapter ? "on" : ""} ${overlap ? "overlap" : ""}`}
+                style={{ left: `${t * 100}%` }}
+                onClick={() => {
+                  setPlaying(false);
+                  goChapter(i);
+                }}
+                title={`${c.yearLabel} — ${c.title}`}
+              >
+                <span>{prettyYear(c.year)}</span>
+              </button>
+            );
+          })}
         </div>
       </footer>
 

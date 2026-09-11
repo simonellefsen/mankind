@@ -22,7 +22,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://mankind-simonellefsens-projects.vercel.app"),
+  metadataBase: new URL("https://mankind-nu.vercel.app"),
   title: "MANKIND — a deep-time atlas",
   description:
     "How Homo sapiens spread from Africa, how Neanderthals, Denisovans and island humans lived beside us, and how ice ages redrew the map.",

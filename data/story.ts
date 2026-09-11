@@ -103,6 +103,8 @@ export const SPECIES: Record<
 export const CLIMATE_KEYS: { year: number; ice: number; shelf: number; label: string }[] = [
   { year: 2000000, ice: 0.28, shelf: 0.35, label: "Early Pleistocene ice" },
   { year: 400000, ice: 0.45, shelf: 0.4, label: "Mid-Pleistocene glacials" },
+  { year: 270000, ice: 0.36, shelf: 0.3, label: "Late Middle Pleistocene" },
+  { year: 155000, ice: 0.22, shelf: 0.12, label: "Approach to the Eemian" },
   { year: 130000, ice: 0.14, shelf: 0.05, label: "Eemian interglacial (MIS 5e)" },
   { year: 115000, ice: 0.35, shelf: 0.25, label: "Early last glacial" },
   { year: 71000, ice: 0.78, shelf: 0.7, label: "MIS 4 — hard cold" },
